@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title>无标题文档</title>
+</head>
+<style>
+#content{width:300px;height:500px;position:relative;overflow:hidden;/*可以删除*/top:100px;left:300px;background:#f00;}
+#nr{width:280px;min-height:500px;background:#696;position:absolute;left:0;top:0;}
+.scroll{width:20px;height:500px;background:#669;position:absolute;right:0;top:0;
+}
+.scroll_top{width:20px;height:15px;background:#333;}
+#scroll_con{width:20px;height:470px;background:#999;position:relative;}
+#scroll_box{width:20px;background:#666;position:absolute;left:0;top:0; cursor:auto;}
+.scroll_bot{width:20px;height:15px;background:#333;}
+</style>
+<script>
+/*
+【清除选择】
+ie在设置setCapture之后内容选择都会被禁止，但也因此不会清除在设置之前就已经选择的内容，而且设置之后也能通过其他方式选择内容，
+例如用ctrl+a来选择内容。
+ps：onkeydown、onkeyup和onkeypress事件不会受到鼠标捕获影响。
+而ff在mousedown时就能清除原来选择的内容，但拖动鼠标，ctrl+a时还是会继续选择内容。
+不过在取消了系统默认动作之后，这样的选择并不会对拖放操作造成影响，这里设置主要还是为了更好的体验。
+
+以前我用禁止拖放对象被选择的方法来达到目的，即ie中设置拖放对象的onselectstart返回false，在ff中设置样式MozUserSelect(css:-moz-user-select)为none。
+但这种方法只能禁止拖放对象本身被选择，后来找到个更好的方法清除选择，不但不影响拖放对象的选择效果，还能对整个文档进行清除：
+ie:document.selection.empty()
+ff:window.getSelection().removeAllRanges()
+为了防止在拖放过程中选择内容，所以把它放到Move程序中，下面是兼容的写法：
+window.getSelection ? window.getSelection().removeAllRanges() : document.selection.empty();
+*/
+function addLoadEvent(func){
+var oldonload=window.onload;
+if (typeof window.onload !='function'){
+window.onload=func;
+}else{
+  window.onload=function(){
+  oldonload();
+  func();
+  }
+  }
+  }
+addLoadEvent(s);
+function s(){
+	
+	scrollFuc('content','nr','scroll_con','scroll_box');
+	scrollBoxH('content','nr','scroll_con','scroll_box');
+	
+	}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//滚动条
+var client=function(){
+	//呈现引擎
+	var engine={
+		ie:0,
+		gecko:0,webkit:0,
+		khtml:0,
+		opera:0,
+		//具体的版本号
+		ver:null
+		};
+	return{engine:engine};	
+	}();
+//调用
+var EventUtil={
+	//事件处理程序
+	addHandler:function(element,type,handler){
+		if(element.addEventListener){element.addEventListener(type,handler,false)}//DOM2
+		else if(element.attachEvent){element.attachEvent('on'+type,handler);}//ie
+		else{element['on'+type]=handler;}//DOM0
+		
+		},
+	//滚轮事件对象的 wheelDelta/FF DOMMouseScroll
+	getWheelDelta:function(event){
+		if(event.wheelDelta){
+			return (client.engine.opera &&client.engine.opera<9.5?-event.wheelDelta:event.wheelDelta);
+			}else{return -event.detail*40;}
+		},
+	//返回事件对象的引用
+	getEvent:function(event){return event?event:window.event;},
+	//返回鼠标相对于事件对象的 X 坐标
+	getX:function(event){return event.offsetX?event.offsetX:event.layerX;},
+	//返回鼠标相对于事件对象的 Y 坐标
+	getY:function(event){return event.offsetY?event.offsetY:event.layerY;},
+	//返回事件目标元素
+	getTarget:function(event){return event.target||event.srcElement;},
+	//取消事件默认行为
+	preventDefaclt:function(event){
+		if(event.preventDefault){event.preventDefault();}
+		else {event.returnValue=false;}
+	},
+	//取消事件进一步捕获或冒泡
+	stopPropagation:function(event){
+		if(event.stopPropagation){event.stopPropagation();}
+		else{event.cancelBubble=true;}
+	},
+	//移除事件处理程序
+	removeHandler:function(element,type,handler){
+		if(element.removeEventListener){element.removeEventListener(type,handler,false)}
+		else if(element.detachEvent){element.detachEvent('on'+type,handler)}
+		else{element['on'+type]=null;}
+		}
+	}
+
+function scrollFuc(contentID,nrID,scrollConID,scrollBoxID){
+	var doc=document;
+	var s=80,//鼠标滚轮速度
+	    t=30,//滚动条最小高度
+	    content=doc.getElementById(contentID),
+	    nr=doc.getElementById(nrID),
+	    scroll_cont=doc.getElementById(scrollConID),
+	    scroll_box=doc.getElementById(scrollBoxID);
+
+		EventUtil.addHandler(content,'mousewheel',handleMouseWheel);//ie
+		EventUtil.addHandler(content,'DOMMouseScroll',handleMouseWheel);//ff
+        EventUtil.addHandler(scroll_cont,'mousedown',scrollContMouseDown);
+
+//滚动区域点击事件
+function scrollContMouseDown(e){
+	e=EventUtil.getEvent(e);
+	var obj=EventUtil.getTarget(e);
+	switch(obj.id){
+		case scrollBoxID:
+		     obj.startY=e.clientY;//原始坐标 这里不能直接赋给obj.startY因为obj是局部变量 虽然他指向scroll_box但是他只是次对象的引用 退出此函数后obj删除了
+		     obj.startTop=parseInt(obj.style.top);
+			 EventUtil.addHandler(doc,'mousemove',mouseMove);
+		     EventUtil.addHandler(doc,'mouseup',mouseUp);
+	         break;
+		case scrollConID:
+		     var scrollBoxTop=EventUtil.getY(e)-Math.ceil(scroll_box.offsetHeight/2);
+			 scrollBoxTop=compareNum(scrollBoxTop,0,scroll_cont.offsetHeight-scroll_box.offsetHeight);
+			 scrollBoxMove(scrollBoxTop);
+	         break;
+		}
+	}
+//滚动区域点击事件的动画函数
+function scrollBoxMove(Top){
+	if (scroll_box.movement){
+	 clearTimeout(scroll_box.movement);
+	 }	 
+	var dist,
+	    nrTop=parseInt(nr.style.top),
+	    ypos=parseInt(scroll_box.style.top);
+	if (ypos==Top){return true;}
+	if (ypos<Top){
+	dist=Math.ceil((Top-ypos)/10);
+	ypos=ypos+dist;
+	}
+	if (ypos>Top){
+	dist=Math.ceil((ypos-Top)/10);
+	ypos=ypos-dist;
+	}
+	nrTop=ypos*-Math.ceil((nr.offsetHeight-content.offsetHeight)/(scroll_cont.offsetHeight-scroll_box.offsetHeight));
+	nrTop=compareNum(nrTop,content.offsetHeight-nr.offsetHeight,0);//ypos不用检测 因为他始终会在Top和ypos之间
+	
+	nr.style.top=nrTop+"px";
+	scroll_box.style.top=ypos+"px";
+	scroll_box.movement=window.setTimeout(function(){
+		scrollBoxMove(Top)
+	},10);
+	}
+//document鼠标移动处理程序
+function mouseMove(e){
+	e=EventUtil.getEvent(e);
+	window.getSelection ? window.getSelection().removeAllRanges() : doc.selection.empty();
+	var nrTop,
+	scrollBoxTop=scroll_box.startTop-(scroll_box.startY-e.clientY);
+	nrTop=scrollBoxTop*-Math.ceil((nr.offsetHeight-content.offsetHeight)/(scroll_cont.offsetHeight-scroll_box.offsetHeight));
+	
+	scrollBoxTop=compareNum(scrollBoxTop,0,(scroll_cont.offsetHeight-scroll_box.offsetHeight));
+	nrTop=compareNum(nrTop,content.offsetHeight-nr.offsetHeight,0);
+
+   //scroll_box.style.cursor='pointer';
+	scroll_box.style.top=scrollBoxTop+'px';
+    nr.style.top=nrTop+'px';
+}
+//document鼠标松开处理程序
+function mouseUp(e){
+	e=EventUtil.getEvent(e);
+	EventUtil.removeHandler(doc,'mousemove',mouseMove);
+	EventUtil.removeHandler(doc,'mouseup',mouseUp);
+}
+//滚轮事件
+function handleMouseWheel(e){
+	e=EventUtil.getEvent(e);
+	EventUtil.stopPropagation(e);//当滚动条嵌套时 阻止滚动事件冒泡
+	var delta=EventUtil.getWheelDelta(e),
+	    scrollBoxTop,
+		nrTop=parseInt(nr.style.top);
+		EventUtil.preventDefaclt(e);//让浏览器的滚动条不动
+	switch(true){
+		case delta<0:
+		     nrTop=nrTop-s>content.offsetHeight-nr.offsetHeight?nrTop-s:content.offsetHeight-nr.offsetHeight;
+			 break;
+		case delta>0:
+		     nrTop=nrTop+s<0?nrTop+s:0;
+			 break;
+	}
+	scrollBoxTop=(scroll_cont.offsetHeight-scroll_box.offsetHeight)*(-nrTop)/(nr.offsetHeight-content.offsetHeight);
+//这里不用用compareNum检测nrTop是否在滚动区域 上面已经检测了 单向检测没有调用检测函数compareNum
+	scrollBoxTop=compareNum(scrollBoxTop,0,scroll_cont.offsetHeight-scroll_box.offsetHeight);
+	nr.style.top=nrTop+'px';
+	scroll_box.style.top=scrollBoxTop+'px';
+	}
+}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//设置scrollBox高度
+function scrollBoxH(contentID,nrID,scrollConID,scrollBoxID){
+ var doc=document;
+ var contentDiv=doc.getElementById(contentID),
+     nrDiv=doc.getElementById(nrID),
+	 scrollConDiv=doc.getElementById(scrollConID),
+	 scrollBoxDiv=doc.getElementById(scrollBoxID);
+	 
+ 	 scrollBoxDiv.style.position='absolute';scrollBoxDiv.style.top=0+'px';
+ 	 nrDiv.style.position='absolute';nrDiv.style.top=0+'px';
+ var H=compareNum(Math.ceil(contentDiv.offsetHeight*scrollConDiv.offsetHeight/nrDiv.offsetHeight),
+				  30,
+				  scrollConDiv.offsetHeight);
+ scrollBoxDiv.style.height=H+'px';
+	}
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//数值检测 检测x是否在某个区间  可以是浮点型
+function compareNum(x,minNum,maxNum){
+	switch(true){
+		case x<minNum:x=minNum;break;
+		case x>maxNum:x=maxNum;break;
+		default:x;
+		}
+		return x;
+	}
+	
+</script>
+<body>
+
+<button id="zjnr">增加内容</button>
+<script>
+document.getElementById('zjnr').onclick=function(){
+	var nr=document.getElementById('nr');
+	var oldText=nr.firstChild.nodeValue;
+	nr.firstChild.nodeValue=oldText+'这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！';
+	
+	scrollBoxH('content','nr','scroll_con','scroll_box');
+	}
+</script>
+
+<button id="jsnr">减少内容</button>
+<script>
+document.getElementById('jsnr').onclick=function(){
+	var nr=document.getElementById('nr');
+	var oldText=nr.firstChild.nodeValue;
+	nr.firstChild.nodeValue='这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！';
+	
+	scrollBoxH('content','nr','scroll_con','scroll_box');
+	}
+</script>
+
+
+<pre style='font-size:16px;color:#222;'>
+说明：
+   	1.content元素不能有border  如果有10px的border 把滚条拖到最下面后 将有10px内容看不到
+   	2.此版本抽象出对scrollBox高度的设置 但是调用方式有所改变：
+     	scrollFuc('content','nr','scroll_con','scroll_box');//启动函数
+	    scrollBoxH('content','nr','scroll_con','scroll_box');//设置box高度 如果nr有增加或减少 就要再调用这个函数 
+不足：
+   	在scrollBoxH函数内部 设置了scroll_box的高度后 会重置nr和滚条的位置为起始位置 在有些情况下是不合理的（改变了nr后 但是不要还要保持nr和滚条的当前位置）
+</pre>
+<div id="content">
+
+ <div id="nr">
+ 朝鲜半岛局势持续紧张，美国核潜艇在参加韩美联合军演后将在半岛附近留驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。
+
+    中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。
+
+    意听中国的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。
+
+    意听中国的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。
+
+    意听中国的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。
+敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。
+
+    意听中国的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。
+
+    意听中国的劝告。与
+    意听中国的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛局势的强有力杠杆，中国在让半岛局势很被动地拖着走，很难给中国的地缘形势做综合评级。
+
+ </div>
+ <div class="scroll">
+  <div class="scroll_top"></div>
+  <div id="scroll_con"><div id="scroll_box"></div></div>
+  <div class="scroll_bot"></div>
+ </div>
+</div>
+
+<br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/>
+</body>
+</html>

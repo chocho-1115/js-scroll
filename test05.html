@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<title>无标题文档</title>
+</head>
+<style>
+.content{width:500px;height:500px;position:relative;overflow:hidden;/*可以删除*/top:0;right:0;background:#f00;}
+.nr{width:490px;min-height:500px;background:#696;position:absolute;left:0;top:0;}
+
+.scroll_con{width:10px;height:100%;background:#999;position:absolute;right:0;top:0;}
+.scroll_box{width:10px;background:#666;position:absolute;left:0;top:0;}
+
+#content_03{width:300px;height:300px;}
+#nr_03{width:290px;min-height:300px;}
+</style>
+<script>
+/*
+【清除选择】
+ie在设置setCapture之后内容选择都会被禁止，但也因此不会清除在设置之前就已经选择的内容，而且设置之后也能通过其他方式选择内容，
+例如用ctrl+a来选择内容。
+ps：onkeydown、onkeyup和onkeypress事件不会受到鼠标捕获影响。
+而ff在mousedown时就能清除原来选择的内容，但拖动鼠标，ctrl+a时还是会继续选择内容。
+不过在取消了系统默认动作之后，这样的选择并不会对拖放操作造成影响，这里设置主要还是为了更好的体验。
+
+以前我用禁止拖放对象被选择的方法来达到目的，即ie中设置拖放对象的onselectstart返回false，在ff中设置样式MozUserSelect(css:-moz-user-select)为none。
+但这种方法只能禁止拖放对象本身被选择，后来找到个更好的方法清除选择，不但不影响拖放对象的选择效果，还能对整个文档进行清除：
+ie:document.selection.empty()
+ff:window.getSelection().removeAllRanges()
+为了防止在拖放过程中选择内容，所以把它放到Move程序中，下面是兼容的写法：
+window.getSelection ? window.getSelection().removeAllRanges() : document.selection.empty();
+*/
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//滚动条
+var EventUtil={
+	//事件处理程序
+	addHandler:function(element,type,handler){
+		if(element.addEventListener){element.addEventListener(type,handler,false)}//DOM2
+		else if(element.attachEvent){element.attachEvent('on'+type,handler);}//ie
+		else{element['on'+type]=handler;}//DOM0
+		},
+	//滚轮事件对象的 wheelDelta/FF DOMMouseScroll
+	getWheelDelta:function(event){
+		if(event.wheelDelta){//ff以外的浏览器
+            //在最新版的opera中window返回undefined ， 在opera9.5中返回对象 在9.5版本之前的版本中wheelDelta的正负号颠倒的
+			return (window.opera&&window.opera.version()<9.5?-event.wheelDelta:event.wheelDelta);
+			}else{return -event.detail*40;}//ff
+		},
+	//返回事件对象的引用
+	getEvent:function(event){return event?event:window.event;},
+	//返回鼠标相对于事件对象的 X 坐标
+	getX:function(event){return event.offsetX?event.offsetX:event.layerX;},
+	//返回鼠标相对于事件对象的 Y 坐标
+	getY:function(event){return event.offsetY?event.offsetY:event.layerY;},
+	//返回事件目标元素
+	getTarget:function(event){return event.target||event.srcElement;},
+	//取消事件默认行为
+	preventDefaclt:function(event){
+		if(event.preventDefault){event.preventDefault();}
+		else {event.returnValue=false;}
+	},
+	//取消事件进一步捕获或冒泡
+	stopPropagation:function(event){
+		if(event.stopPropagation){event.stopPropagation();}
+		else{event.cancelBubble=true;}
+	},
+	//移除事件处理程序
+	removeHandler:function(element,type,handler){
+		if(element.removeEventListener){element.removeEventListener(type,handler,false)}
+		else if(element.detachEvent){element.detachEvent('on'+type,handler)}
+		else{element['on'+type]=null;}
+		}
+	}
+
+
+
+
+
+
+
+
+
+
+/*
+-----------------------------------------构造函数
+参数说明：
+options={                   
+                            // 必选参数
+                            con  : 'content_01',     //  内容可见区域元素的id
+                            nr   : 'nr_01',          //  内容元素id
+                            scon : 'scroll_con_01',  //  滚动条区域元素的id
+                            sbox : 'scroll_box_01',  //  滚条条元素id
+                            
+                            // 可选参数
+                            toTop            : 'top',            //  置顶元素id
+                            sboxMinH         ：30,               //  滚动条最小高度
+                            mousewheelSpeed  : 40                //  鼠标滚轮事件速度（触发一次事件 nr滚动多少像素）
+                            
+                            
+                            
+                            
+}
+-----------------------------------------refreshWin 方法（当内容变化时 刷新内容区域）
+WinScroll.refreshWin(topV)   
+
+                            //topV参数说明：
+                                topV  为空时 刷新后置顶
+                                topV  为number时 内容刷新后跳至topV的位置 当topV为正或0时 即置顶 当topV为足够小时 即跳至底部
+                                topV  为false时 内容刷新后 保持原有位置
+
+*/
+function WinScroll(options,topV){
+				   	//  默认配置
+					this.con = '';               
+					this.nr= '';               
+					this.scon= '';              
+					this.sbox= '';               
+					this.sboxMinH= 30;               
+					this.mousewheelSpeed= 40;             
+					this.toTop= null;               
+					
+			   		if(options){
+			   		  for(x in options){this[x] = options[x];}
+			   		};
+    
+				   	this.init(topV);	//初始化
+}
+    
+WinScroll.prototype={
+    
+	constructor : 'WinScroll',
+    
+    init : function(topV){
+            var doc=document,
+                thisWin=this;
+        
+	        thisWin.con  = doc.getElementById(thisWin.con);
+	        thisWin.nr   = doc.getElementById(thisWin.nr);
+	        thisWin.scon = doc.getElementById(thisWin.scon);
+	        thisWin.sbox = doc.getElementById(thisWin.sbox);
+	        if(thisWin.toTop) thisWin.toTop = doc.getElementById(thisWin.toTop);
+
+            thisWin.refreshWin(topV);
+        
+	        var bWheel=true;//是否启动滚轮事件 鼠标区域点击动画运行时 禁止滚轮事件
+        
+	        var s=thisWin.mousewheelSpeed,
+                con=thisWin.con,
+                nr=thisWin.nr,
+                scon=thisWin.scon,
+                sbox=thisWin.sbox,
+                toTop=thisWin.toTop;
+		
+	        EventUtil.addHandler(con,'mousewheel',handleMouseWheel);//ie
+	        EventUtil.addHandler(con,'DOMMouseScroll',handleMouseWheel);//ff
+	        EventUtil.addHandler(scon,'mousedown',scrollContMouseDown);
+	        if(toTop){EventUtil.addHandler(toTop,'click',function(){bWheel=false;toTopAnim(0)});}//如果置顶按钮存在 就添加置顶事件
+
+	        //滚动区域点击事件
+	        function scrollContMouseDown(e){
+                e=EventUtil.getEvent(e);
+                var obj=EventUtil.getTarget(e);
+                switch(obj.id){
+                    case sbox.id:
+                      obj.startY=e.clientY;//原始坐标 这里不能直接赋给obj.startY因为obj是局部变量 虽然他指向sbox但是他只是次对象的引用 退出此函数后obj删除了
+                      obj.startTop=parseInt(obj.style.top);
+                      EventUtil.addHandler(doc,'mousemove',mouseMove);
+                      EventUtil.addHandler(doc,'mouseup',mouseUp);
+                      doc.body.onselectstart = function(){return false};//去掉这句后 谷歌下点击滚动条拖动时 鼠标指针变为文字选择指针了
+                    break;
+                    case scon.id:
+                      var scrollBoxTop=EventUtil.getY(e)-Math.ceil(sbox.offsetHeight/2);
+                      scrollBoxTop=Math.min(Math.max(scrollBoxTop,0),scon.offsetHeight-sbox.offsetHeight);
+                      bWheel=false;toTopAnim(scrollBoxTop);
+                    break;
+                }
+	        }
+
+	        //滚动区域点击事件的动画函数
+	        function toTopAnim(Top,startTop){
+                if (sbox.movement){clearTimeout(sbox.movement);}
+                if(!startTop) var startTop=parseInt(sbox.style.top);
+	
+                if (startTop<Top){
+                  startTop=Math.ceil(startTop+(Top-startTop)/10);
+                  if(startTop>Top) startTop=Top
+                }
+                else if (startTop>Top){
+                  startTop=Math.floor(startTop-(startTop-Top)/10);
+                  if(startTop<Top) startTop=Top
+                }
+	
+                var nrTop,
+                    nrH=nr.offsetHeight,
+                    conH=con.offsetHeight;
+                nrTop=startTop*-Math.ceil((nrH-conH)/(scon.offsetHeight-sbox.offsetHeight));
+                nrTop=Math.min(Math.max(nrTop,conH-nrH),0);//startTop不用检测 因为他始终会在Top和startTop之间
+	
+                nr.style.top=nrTop+"px";
+                sbox.style.top=startTop+"px";
+	
+                if (startTop==Top){bWheel=true;return true;}
+	
+                sbox.movement=setTimeout(function(){
+                    toTopAnim(Top,startTop);
+                },10);
+	        }
+	        //document鼠标移动处理程序
+	        function mouseMove(e){
+                e=EventUtil.getEvent(e);
+                window.getSelection ? window.getSelection().removeAllRanges() : doc.selection.empty();
+                var nrTop,
+                scrollBoxTop=sbox.startTop-(sbox.startY-e.clientY);
+	
+                nrTop=scrollBoxTop*-(nr.offsetHeight-con.offsetHeight)/(scon.offsetHeight-sbox.offsetHeight);
+                scrollBoxTop=Math.min(Math.max(scrollBoxTop,0),scon.offsetHeight-sbox.offsetHeight);
+                nrTop=Math.min(Math.max(nrTop,con.offsetHeight-nr.offsetHeight),0);
+
+                sbox.style.top=scrollBoxTop+'px';
+                nr.style.top=nrTop+'px';
+	
+	        }
+	        //document鼠标松开处理程序
+	        function mouseUp(){
+                doc.body.onselectstart = function(){return true};
+                EventUtil.removeHandler(doc,'mousemove',mouseMove);
+                EventUtil.removeHandler(doc,'mouseup',mouseUp);
+	        }
+	        //滚轮事件
+	        function handleMouseWheel(e){
+                e=EventUtil.getEvent(e);
+                EventUtil.preventDefaclt(e);//让浏览器的滚动条不动
+                EventUtil.stopPropagation(e);//当滚动条嵌套时 阻止滚动事件冒泡
+                if(bWheel==false){return false;}//置顶函数在运行时 禁用滚轮
+                var delta=EventUtil.getWheelDelta(e),
+                    scrollBoxTop,
+                    nrTop=parseInt(nr.style.top),
+                    conH=con.offsetHeight,
+                    nrH=nr.offsetHeight,
+                    sconH=scon.offsetHeight,
+                    sboxH=sbox.offsetHeight;
+			
+                switch(true){
+                    case delta<0:
+                        nrTop=nrTop-s>conH-nrH?nrTop-s:conH-nrH;
+                    break;
+                    case delta>0:
+                        nrTop=nrTop+s<0?nrTop+s:0;
+                    break;
+                }
+                scrollBoxTop=(sconH-sboxH)*(-nrTop)/(nrH-conH);
+                //这里不用用compareNum检测nrTop是否在滚动区域 上面已经检测了 单向检测没有调用检测函数compareNum
+                scrollBoxTop=Math.min(Math.max(scrollBoxTop,0),sconH-sboxH);
+                nr.style.top=nrTop+'px';
+                sbox.style.top=scrollBoxTop+'px';
+	        }
+					
+					
+
+    },
+
+    refreshWin:function(topV){
+            var thisWin=this;
+            var con=thisWin.con,
+                nr=thisWin.nr,
+                scon=thisWin.scon,
+                sbox=thisWin.sbox,
+                sboxMinH=thisWin.sboxMinH;
+	 
+            var conH=con.offsetHeight,
+                nrH=nr.offsetHeight,
+                sconH=scon.offsetHeight,
+                sboxH=Math.ceil(Math.min(Math.max(conH*sconH/nrH,sboxMinH),conH));
+
+            sbox.style.height=sboxH+'px';
+
+            if(topV===false&&conH<nrH){
+                //增加或减少内容后 保持nr区域原有位置
+                if(parseInt(nr.style.top)<conH-nrH){nr.style.top=conH-nrH+'px';}
+                sbox.style.top=Math.ceil(parseInt(nr.style.top)*(sconH-sboxH)/(conH-nrH))+'px';
+            }else if(typeof topV==='number'&&conH<nrH){//增加或减少内容后 内容跳到指定区域
+                topV=Math.min(Math.max(topV,conH-nrH),0);
+                nr.style.top=topV+'px';
+                sbox.style.top=Math.ceil(parseInt(nr.style.top)*(sconH-sboxH)/(conH-nrH))+'px';
+            }else{
+                //增加或减少内容后 刷新滚动区域（置顶）
+                sbox.style.top=0+'px';nr.style.top=0+'px';
+            }
+    }
+	
+}
+</script>
+<body>
+
+<button id="btn01">增加内容并跳至-38位置</button>
+<script>
+document.getElementById('btn01').onclick=function(){
+	var nr=document.getElementById('nr_01');
+	var oldText=nr.firstChild.nodeValue;
+	nr.firstChild.nodeValue=oldText+'这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！这是增加的内容哦！++';
+	win01.refreshWin(-38);
+	}
+</script>
+
+<button id="btn02">减少内容 保持现在位置</button>
+<script>
+document.getElementById('btn02').onclick=function(){
+	var nr=document.getElementById('nr_01');
+	var oldText=nr.firstChild.nodeValue;
+	nr.firstChild.nodeValue='这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！++';
+	win01.refreshWin(false);
+	}
+</script>
+
+<button id="btn03">减少内容 刷新位置(置顶)</button>
+<script>
+document.getElementById('btn03').onclick=function(){
+	var nr=document.getElementById('nr_01');
+	var oldText=nr.firstChild.nodeValue;
+	nr.firstChild.nodeValue='这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！这是新内容哦！++';
+	win01.refreshWin(true);
+	}
+</script>
+
+<div id="content_01" class="content">
+ <div id="nr_01" class="nr">
+今天就是感恩节啦！特此向所有与我见过面的、聊过天的、吃过饭的、来过电的、共过事的、闯过难的、发过短信的、通过飞秋的同事送上我诚挚的祝福！<br/>持续紧张，美国核潜艇在<br/>参加韩<br/>美联合军演后将在半岛附近留驻一段时间，<br/>韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局的出路。中国的位驻一段时间，韩国国内要求研<br/>制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东<br/>北亚没有公开的敌人，这是中国的独特战中国的位<br/>驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不半岛局势的出路。<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻<br/>一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国的劝告。与此友。此外中国在东<b<br/>r/>北亚没有公开的敌人，这是中国的独<br/>特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都<br/>看不半岛局势的出路。敌人，这是中国的<br/>独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在<br/>上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中<br/>国的劝告。与<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛<br/>局势的强有力杠杆，中国在让半岛<br/>局势很被动地拖着走，很难给中国的地缘形势做综合评级。
+ </div>
+ 
+  <div id="scroll_con_01" class="scroll_con"><div id="scroll_box_01" class="scroll_box"></div></div>
+  
+</div>
+<br/>
+
+
+
+
+<p>
+ <span style="background:#966;" id="top">top</span>
+</p>
+
+
+
+
+<div id="content_02" class="content">
+ <div id="nr_02" class="nr">
+朝鲜半岛局势<br/>持续紧张，美国核潜艇在<br/>参加韩<br/>美联合军演后将在半岛附近留驻一段时间，<br/>韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局的出路。中国的位驻一段时间，韩国国内要求研<br/>制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东<br/>北亚没有公开的敌人，这是中国的独特战中国的位<br/>驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不半岛局势的出路。<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻<br/>
+
+            <div id="content_03" class="content">
+             <div id="nr_03" class="nr">
+朝鲜半岛局势<br/>持续紧张，美国核潜艇在<br/>参加韩<br/>美联合军演后将在半岛附近留驻一段时间，<br/>韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局的出路。中国的位驻一段时间，韩国国内要求研<br/>制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东<br/>北亚没有公开的敌人，这是中国的独特战中国的位<br/>驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不半岛局势的出路。<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻<br/>一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国的劝告。与此友。此外中国在东<b<br/>r/>北亚没有公开的敌人，这是中国的独<br/>特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都<br/>看不半岛局势的出路。敌人，这是中国的<br/>独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在<br/>上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中<br/>国的劝告。与<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛<br/>局势的强有力杠杆，中国在让半岛<br/>局势很被动地拖着走，很难给中国的地缘形势做综合评级。
+             </div>
+              
+              <div id="scroll_con_03" class="scroll_con"><div id="scroll_box_03" class="scroll_box"></div></div>
+              
+            </div>
+
+一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国的劝告。与此友。此外中国在东<b<br/>r/>北亚没有公开的敌人，这是中国的独<br/>特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都<br/>看不半岛局势的出路。敌人，这是中国的<br/>独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在<br/>上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中<br/>国的劝告。与<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛<br/>局势的强有力杠杆，中国在让半岛<br/>局势很被动地拖着走，很难给中国的地缘形在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国的劝告。与此友。此外中国在东<b<br/>r/>北亚没有公开的敌人，这是中国的独<br/>特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都<br/>看不半岛局势的出路。敌人，这是中国的<br/>独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在<br/>上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中<br/>国的劝告。与<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛<br/>局势的强有力杠杆，中国在让半岛<br/>局势很被动地拖着走，很难给中国的地缘形在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国的劝告。与此友。此外中国在东<b<br/>r/>北亚没有公开的敌人，这是中国的独<br/>特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都<br/>看不半岛局势的出路。敌人，这是中国的<br/>独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在<br/>上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中<br/>国的劝告。与<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛<br/>局势的强有力杠杆，中国在让半岛<br/>局势很被动地拖着走，很难给中国的地缘形在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国的劝告。与此友。此外中国在东<b<br/>r/>北亚没有公开的敌人，这是中国的独<br/>特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都<br/>看不半岛局势的出路。敌人，这是中国的<br/>独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在<br/>上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中<br/>国的劝告。与<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛<br/>局势的强有力杠杆，中国在让半岛<br/>局势很被动地拖着走，很难给中国的地缘形在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国的劝告。与此友。此外中国在东<b<br/>r/>北亚没有公开的敌人，这是中国的独<br/>特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升<br/>。韩美与朝鲜相互刺激，战略分析家们都<br/>看不半岛局势的出路。敌人，这是中国的<br/>独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在<br/>上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中国<br/>的劝告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战中国的位驻一段时间，韩国国内要求研制核武器的呼声在上升。韩美与朝鲜相互刺激，战略分析家们都看不到半岛局势的出路。意听中<br/>国的劝告。与<br/>意听中国的劝<br/>告。与此友。此外中国在东北亚没有公开的敌人，这是中国的独特战略处境。没有公开敌人，但也没有影响半岛<br/>局势的强有力杠杆，中国在让半岛<br/>局势很被动地拖着走，很难给中国的地缘形势做综合评级。
+ </div>
+  
+  <div id="scroll_con_02" class="scroll_con"><div id="scroll_box_02" class="scroll_box"></div></div>
+  
+</div>
+<br/>
+
+<script>
+    
+
+//调用
+    var win01=new WinScroll({
+                            con  : 'content_01',
+                            nr   : 'nr_01',
+                            scon : 'scroll_con_01',
+                            sbox : 'scroll_box_01',
+                            toTop : 'top'
+                            });
+    var win02=new WinScroll({
+                            con  : 'content_02',
+                            nr   : 'nr_02',
+                            scon : 'scroll_con_02',
+                            sbox : 'scroll_box_02',
+                            toTop : 'top',
+                            sboxMinH : 150,
+                            mousewheelSpeed : 10
+                            },-99999);
+    var win03=new WinScroll({
+                            con  : 'content_03',
+                            nr   : 'nr_03',
+                            scon : 'scroll_con_03',
+                            sbox : 'scroll_box_03',
+                            toTop : 'top'
+                            },666);
+                            
+	
+</script>
+<pre style='font-size:16px;color:#222;'>
+说明：
+    兼容性：ie6+（混杂模式） Firefox3.6.28+  oprea9.0+  
+新版说明：
+    简单封装了
+    参数以对象的形式传入
+不足： 
+    还可以进一步封装 优化
+    在内容不足时 隐藏滚动条
+    无法实现横向滚动条
+      
+
+     </pre>
+<br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/><br/>
+</body>
+</html>
